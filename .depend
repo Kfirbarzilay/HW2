@@ -1,0 +1,2 @@
+CacheInterface.o: CacheInterface.cpp CacheInterface.h
+cacheSim.o: cacheSim.cpp CacheInterface.h
