@@ -10,15 +10,10 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <deque>
 #include <unordered_map>
 #include <vector>
-#include <stdint.h>
 #include <math.h>
 #include <list>
-#include <queue>
-
-#define EMPTY UINT32_MAX
 
 using namespace std;
 
