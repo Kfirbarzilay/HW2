@@ -56,24 +56,26 @@ typedef struct CacheSet
     /**
      * checks if cache is full.
      */
-     bool isCacheSetFull();
+    bool isCacheSetFull();
 
-     /**
-      * check if dirty
-      */
-     bool isDirty(unsigned tag);
+    /**
+     * check if dirty
+     */
+    bool isDirty(unsigned tag);
 
-     unsigned lruBlock();
+    unsigned lruBlock();
 
-     void removeLruBlock(unsigned tag);
+    void removeLruBlock(unsigned tag);
 
     void markAsDirty(unsigned tag);
+
+    void unmarkDirty(unsigned address);
     /**************************************************************************************
      *                                   Members                                          *
      **************************************************************************************/
     unsigned maximumCapacity; // Max ways in set
-    deque<unsigned> LRU; // Keeps track of least recently used blocks of all blocks associated with this set.
-    unordered_map<unsigned, deque<unsigned>::iterator> map; // Stores the block position in the ith way.
+    list<unsigned> LRU; // Keeps track of least recently used blocks of all blocks associated with this set.
+    unordered_map<unsigned, list<unsigned>::iterator> map; // Stores the block position in the ith way.
 }CacheSet;
 
 
@@ -136,6 +138,7 @@ typedef struct Cache
     unsigned getLruBlock(unsigned address);
     void removeLruBlock(unsigned address);
     void markAsDirty(unsigned address);
+    void unmarkDirty(unsigned address);
 
     // Member variables.
     vector<CacheSet> cacheLines; // Holds the cache lines for all sets and their fifoQueue queue.
@@ -190,7 +193,7 @@ typedef struct CacheController
         else
             L2MissRate = (float)memAccessed/L2Accessed;
         float totalAccessTime = (L1Accessed * L1Cycle) + (L2Accessed * L2Cycle) + (this->victimCacheExists) * victimCacheAccessed +
-                (memAccessed * memCycle);
+                                (memAccessed * memCycle);
         avgAccTime = totalAccessTime / L1Accessed;
     }
 

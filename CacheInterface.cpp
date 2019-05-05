@@ -59,7 +59,11 @@ void CacheController::accessCacheOnRead(unsigned address)
         else // Hit in L2 cache.
         {
             this->L2.updateLruOnHit(address, false);
-            this->loadToL1(address, false);
+            // TODO check if dirty
+            bool isBlockDirty = this->L2.isDirty(address);
+            if (isBlockDirty)
+                this->L2.unmarkDirty(address);
+            this->loadToL1(address, isBlockDirty);
         }
     }
     else // Hit in L1 cache.
@@ -160,7 +164,7 @@ void CacheController::accessCacheOnWrite(unsigned address)
                     this->loadToL2AndL1(address, isDirty);
 
                 }
-                else // No victim cache
+                else // No victim cache. Access memory
                 {
                     this->memAccessed++;
                     this->loadToL2AndL1(address, true);
@@ -169,7 +173,11 @@ void CacheController::accessCacheOnWrite(unsigned address)
             else // Hit in L2 cache.
             {
                 this->L2.updateLruOnHit(address, false);
-                this->loadToL1(address, true);
+                // TODO check if dirty
+                bool isBlockDirty = this->L2.isDirty(address);
+                if (isBlockDirty)
+                    this->L2.unmarkDirty(address);
+                this->loadToL1(address, isBlockDirty);
             }
         }
         else // Hit in L1 cache.
@@ -308,6 +316,7 @@ void Cache::updateLruOnHit(unsigned address, bool isWrite) // TODO update
     // update fifoQueue: erase from current location and move to head of fifoQueue.
     auto it = cacheSet.map[tag];
     unsigned value = *it | isWrite;
+    cacheSet.map.erase(tag);
     cacheSet.LRU.erase(it);
     cacheSet.LRU.push_front(value);
     cacheSet.map[tag] = cacheSet.LRU.begin();
@@ -321,7 +330,7 @@ bool Cache::isSetFull(unsigned address) {
 bool Cache::isDirty(unsigned int address) {
     unsigned set = this->parseSet(address);
     unsigned tag = this->parseTag(address);
-    return this->cacheLines[set].isDirty(tag);
+    return this->cacheLines[set].isDirty(tag); // TODO tag values don't match
 }
 
 unsigned Cache::getLruBlock(unsigned address) {
@@ -341,7 +350,11 @@ void Cache::markAsDirty(unsigned address) {
     unsigned tag = this->parseTag(address);
     this->cacheLines[set].markAsDirty(tag);
 }
-
+void Cache::unmarkDirty(unsigned address) {
+    unsigned set = this->parseSet(address);
+    unsigned tag = this->parseTag(address);
+    this->cacheLines[set].unmarkDirty(tag);
+}
 
 /**************************************************************************************
  *                                   CacheSet                                         *
@@ -376,7 +389,7 @@ void CacheSet::insertBlockToSet(unsigned address_dirty, unsigned tag)
 
 bool CacheSet::isCacheSetFull()
 {
-    return this->map.size() == this->maximumCapacity;
+    return this->LRU.size() == this->maximumCapacity;
 }
 
 bool CacheSet::isDirty(unsigned tag)
@@ -402,16 +415,10 @@ void CacheSet::markAsDirty(unsigned tag)
     *it |= 1;
 }
 
-
-
-// TODO: 1. Make sure dirty bit is not lost in insert or in removal
-//       2. Write back functionality: updating lower layers when a block gets kicked out.
-//       3. Write on allocate and write with no allocate.
-//       4. Victim cache functionality.
-
-// TODO make sure to mark dirty
-
-
+void CacheSet::unmarkDirty(unsigned tag) {
+    auto it = this->map[tag];
+    *it &= 0xFFFFFFFE;
+}
 
 /**************************************************************************************
  *                                   VictimCache                                      *
@@ -432,3 +439,5 @@ bool VictimCache::isVictimCacheFull() {
 bool VictimCache::hitInVictim(unsigned address) {
     return false;
 }
+
+
