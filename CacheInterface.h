@@ -32,6 +32,9 @@ typedef struct CacheSet
     {
         maximumCapacity = n;
     }
+    ~CacheSet()
+    {
+    }
     /**************************************************************************************
      *                                   Methods                                          *
      **************************************************************************************/
@@ -47,27 +50,31 @@ typedef struct CacheSet
      * inserts a block to this cache set.
      * @param tag
      */
-    void insertBlockOnMiss(unsigned tag);
+    void insertBlockToSet(unsigned address, unsigned tag);
 
+//    unsigned parseTag(unsigned address);
     /**
      * checks if cache is full.
      */
      bool isCacheSetFull();
+
+     /**
+      * check if dirty
+      */
+     bool isDirty(unsigned tag);
+
+     unsigned lruBlock();
+
+     void removeLruBlock(unsigned tag);
+
+    void markAsDirty(unsigned tag);
     /**************************************************************************************
      *                                   Members                                          *
      **************************************************************************************/
-
-    struct Compare    // Function object to pass to map to find an element in the cache set.
-    {
-        bool operator()(const unsigned& p1, const unsigned& p2)const
-        {
-            return (p1 >> 1u) == (p2 >> 1u);
-        }
-    };
     unsigned maximumCapacity; // Max ways in set
     deque<unsigned> LRU; // Keeps track of least recently used blocks of all blocks associated with this set.
-    unordered_map<unsigned, deque<unsigned>::iterator, hash<unsigned>, Compare> map; // Stores the block position in the ith way.
-}CacheLine;
+    unordered_map<unsigned, deque<unsigned>::iterator> map; // Stores the block position in the ith way.
+}CacheSet;
 
 
 
@@ -92,7 +99,10 @@ typedef struct Cache
         tagSize = 32 - offsetSize - setSize;
         tagDirectorySize = static_cast<unsigned >( pow(2, log_LSize - (log_BSize + log_LAssoc) ) );
     }
+    ~Cache()
+    {
 
+    }
     /**
      * Parses the set of a given address.
      * @param address
@@ -114,18 +124,26 @@ typedef struct Cache
      */
     bool gotHit(unsigned address);
 
+    bool isSetFull(unsigned address);
     /**
      * inserts the address with the dirty bit to this cache.
-     * @param addrees_dirty
+     * @param address
      */
-    void insertBlockToCacheOnMiss(unsigned addrees_dirty);
+    void insertBlockToCache(unsigned address, bool isDirty);
+    void updateLruOnHit(unsigned address, bool isWrite);
+
+    bool isDirty(unsigned int address);
+    unsigned getLruBlock(unsigned address);
+    void removeLruBlock(unsigned address);
+    void markAsDirty(unsigned address);
+
     // Member variables.
-    vector<CacheSet> cacheLines; // Holds the cache lines for all sets and their LRU queue.
+    vector<CacheSet> cacheLines; // Holds the cache lines for all sets and their fifoQueue queue.
     unsigned tagDirectorySize;
     unsigned tagSize; // Number of bits required for a tag. Used for searching the cache ways for a specific set.
     unsigned setSize; // Number of bits required for the set.
+
     unsigned offsetSize; // Number of bits required for the block size.
-    void updateLruOnHit(unsigned address);
 }Cache;
 
 /**
@@ -137,29 +155,58 @@ typedef struct VictimCache
     VictimCache(unsigned Log_BSize): Log_BSize(Log_BSize)
     {
     }
+    ~VictimCache()
+    {
+
+    }
+    void addBlock(unsigned address, bool isDirty);
+    bool isVictimCacheFull();
+    bool hitInVictim(unsigned address);
     const unsigned maximumCapacitance = 4;
-    list<unsigned> LRU; // LRU storing the complete address.
+    list<unsigned> fifoQueue; // fifoQueue storing the complete address.
     unsigned Log_BSize;
 }VictimCache;
 
-typedef struct cacheController
+typedef struct CacheController
 {
-    cacheController(Cache& L1, Cache& L2, VictimCache& victimCache, bool victimCacheExists)
-            : L1(L1), L2(L2), victimCache(victimCache), victimCacheExists(victimCacheExists) {
+    CacheController(Cache &L1, Cache &L2, VictimCache &victimCache, bool victimCacheExists, float memCycle,
+                    float l1Cycle, float l2Cycle, bool writeAllocate)
+            : L1(L1), L2(L2), victimCache(victimCache), victimCacheExists(victimCacheExists), memCycle(memCycle),
+              L1Cycle(l1Cycle), L2Cycle(l2Cycle), writeAllocate(writeAllocate) {
+    }
+    ~CacheController()
+    {
+
     }
     // Methods
-    void accessCache(unsigned address, bool isWrite);
-    void insertBlockOnMiss(unsigned address, bool isWrite);
+    void accessCacheOnRead(unsigned address);
+    void accessCacheOnWrite(unsigned address);
+    void loadToL2AndL1(unsigned address, bool isWrite);
+    void loadToL1(unsigned address, bool isWrite);
+    void calculateStats() {
+        L1MissRate = (float)L2Accessed/L1Accessed;
+        if (victimCacheExists)
+            L2MissRate = (float)victimCacheAccessed/L2Accessed;
+        else
+            L2MissRate = (float)memAccessed/L2Accessed;
+        float totalAccessTime = (L1Accessed * L1Cycle) + (L2Accessed * L2Cycle) + (this->victimCacheExists) * victimCacheAccessed +
+                (memAccessed * memCycle);
+        avgAccTime = totalAccessTime / L1Accessed;
+    }
+
     // Members
     Cache L1, L2;
     VictimCache victimCache;
     bool victimCacheExists;
+    float memCycle;
+    float L1Cycle;
+    float L2Cycle;
+    bool writeAllocate;
     float L1MissRate = 0;
     float L2MissRate = 0;
     float avgAccTime = 0;
     unsigned L1Accessed = 0;
     unsigned L2Accessed = 0;
-    unsigned L2Misses = 0;
     unsigned victimCacheAccessed = 0;
     unsigned memAccessed = 0;
 }CacheController;

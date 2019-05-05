@@ -3,6 +3,28 @@
 
 using namespace std;
 
+void printMap(Cache L) {
+    for (size_t i = 0; i < L.cacheLines.size(); ++i)
+    {
+        cout << "cache set # " << i << "   ";
+        for (auto const pair : L.cacheLines[i].map)
+        {
+            cout << "{" <<  pair.first << ", " << *(pair.second) << ", " << ((*(pair.second) & 1) ? "dirty" : "") << "}   ";
+//            cout << "{" <<  pair << "}" ;
+        }
+        cout << endl;
+    }
+}
+
+void printVicMap(VictimCache vic) {
+    cout << "victim cache:" << endl;
+    for (unsigned const i : vic.fifoQueue)
+    {
+        cout << "{" << i << ", " << ((i & 1)  ? "dirty" : "") << "}  ";
+    }
+    cout << endl;
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -55,13 +77,15 @@ int main(int argc, char *argv[]) {
 
 	// Constructing L1 and L2 caches:
 	Cache* L1 = new Cache(BSize, L1Size,L1Assoc);
+//	Cache L1(BSize, L1Size,L1Assoc);
 	Cache* L2 = new Cache(BSize, L2Size, L2Assoc);
+//	Cache L2(BSize, L2Size, L2Assoc);
 
 	// Constructing a victim cache. Used only if VicCache == 1.
-    VictimCache victimCache(BSize);
+    VictimCache* victimCache = new VictimCache(BSize);
 
     // Construct cache controller
-    CacheController controller(*L1, *L2, victimCache, VicCache);
+    CacheController controller(*L1, *L2, *victimCache, VicCache, MemCyc, L1Cyc, L2Cyc, WrAlloc);
 
 
 	while (getline(file, line))
@@ -75,7 +99,7 @@ int main(int argc, char *argv[]) {
 			return 0;
 		}
 
-		// DEBUG - remove this line
+//		// DEBUG - remove this line
 		cout << "operation: " << operation;
 
 		string cutAddress = address.substr(2); // Removing the "0x" part of the address
@@ -89,12 +113,28 @@ int main(int argc, char *argv[]) {
 		// DEBUG - remove this line
 		cout << " (dec) " << num << endl;
 
-		controller.accessCache(num,operation == 'w');
-	}
+		if (operation == 'w')
+        {
+		    controller.accessCacheOnWrite(num);
+        }
+		else
+        {
+		    controller.accessCacheOnRead(num);
+		}
+		cout << "L1 cache" << endl;
+        printMap(controller.L1);
+        cout << endl << "L2 cache" << endl;
+        printMap(controller.L2);
+        printVicMap(controller.victimCache);
+        cout << endl;
 
-//	printf("L1miss=%.03f ", L1MissRate);
-//	printf("L2miss=%.03f ", L2MissRate);
-//	printf("AccTimeAvg=%.03f\n", avgAccTime);
-
+    }
+    controller.calculateStats();
+	printf("L1miss=%.03f ", controller.L1MissRate);
+	printf("L2miss=%.03f ", controller.L2MissRate);
+	printf("AccTimeAvg=%.03f\n", controller.avgAccTime);
+    delete L1;
+    delete L2;
+    delete victimCache;
 	return 0;
 }
