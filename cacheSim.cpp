@@ -7,12 +7,14 @@ void printMap(Cache L) {
     for (size_t i = 0; i < L.cacheLines.size(); ++i)
     {
         cout << "cache set # " << i << "   ";
-        for (auto const pair : L.cacheLines[i].map)
+        for (auto const it : L.cacheLines[i].LRU)
         {
-            cout << "{" <<  pair.first << ", " << *(pair.second) << ", " << ((*(pair.second) & 1) ? "dirty" : "") << "}   ";
+//            cout << "{" <<  pair.first << ", " << *(pair.second) << ", " << ((*(pair.second) & 1) ? "dirty" : "") << "}   ";
 //            cout << "{" <<  pair << "}" ;
+            cout << "{" << it << ", " << ((it & 1) ? "dirty" : "") << "}    ";
         }
-        cout << endl;
+        cout << "   LRU block is: " << L.cacheLines[i].lruBlock();
+        cout << "   MRU block is: " << L.cacheLines[i].LRU.front() << endl;
     }
 }
 
@@ -71,6 +73,21 @@ void checkRep(CacheController controller)
                     assert (count == 1);
                 }
             }
+        }
+    }
+
+    for (unsigned value : vic.fifoQueue)
+    {
+        bool found = false;
+        if (L1.gotHit(value))
+        {
+            cout << "not suppose to be in L1" << endl;
+            assert(false);
+        }
+        if (L2.gotHit(value))
+        {
+            cout << "not suppose to be in L2" << endl;
+            assert(false);
         }
     }
 }
@@ -137,7 +154,8 @@ int main(int argc, char *argv[]) {
     // Construct cache controller
     CacheController controller(*L1, *L2, *victimCache, VicCache, MemCyc, L1Cyc, L2Cyc, WrAlloc);
 
-
+    // TODO delete this
+    unsigned count = 1;
     while (getline(file, line))
     {
         stringstream ss(line);
@@ -150,7 +168,7 @@ int main(int argc, char *argv[]) {
         }
 
 //		// DEBUG - remove this line
-        cout << "operation: " << operation;
+        cout << count++ << " operation: " << operation;
 
         string cutAddress = address.substr(2); // Removing the "0x" part of the address
 

@@ -65,6 +65,7 @@ typedef struct CacheSet
     void markAsDirty(unsigned tag);
 
     void unmarkDirty(unsigned address);
+    void removeSpecificBlock(unsigned tag);
     /**************************************************************************************
      *                                   Members                                          *
      **************************************************************************************/
@@ -132,6 +133,7 @@ typedef struct Cache
     bool isDirty(unsigned int address);
     unsigned getLruBlock(unsigned address);
     void removeLruBlock(unsigned address);
+    void removeSpecificBlock(unsigned address); // used for evicting a block to conserve inclusiveness.
     void markAsDirty(unsigned address);
     void unmarkDirty(unsigned address);
 
@@ -157,7 +159,11 @@ typedef struct VictimCache
     {
 
     }
+    unsigned createMask(unsigned address);
     void addBlock(unsigned address, bool isDirty);
+    void removeFromVictimCache(unsigned address);
+    bool isBlockDirty(unsigned address);
+    void markDirty(unsigned address);
     bool isVictimCacheFull();
     bool hitInVictim(unsigned address);
     const unsigned maximumCapacitance = 4;

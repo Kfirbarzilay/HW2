@@ -1,6 +1,7 @@
 //
 // Created by compm on 26/04/19.
 //
+#include <assert.h>
 #include "CacheInterface.h"
 
 
@@ -29,26 +30,22 @@ void CacheController::accessCacheOnRead(unsigned address)
             {
                 this->victimCacheAccessed++;
                 // search Victim Cache for the address.
-                bool hitVictimCache = false;
-                bool isDirty = false;
-                for (unsigned& value : this->victimCache.fifoQueue)
-                {
-                    unsigned mask = value & 0xFFFFFFFC;
-                    if (mask == address) {
-                        isDirty = 1 & value;
-                        hitVictimCache = true;
-                        this->victimCache.fifoQueue.remove(value);
-                        break;
-                    }
-                }
+                bool hitVictimCache = this->victimCache.hitInVictim(address);
 
                 // Not found in victim cache and memory is accessed
                 if(!hitVictimCache)
+                {
                     this->memAccessed++;
-
-                // Load to L1 and L2.
-                this->loadToL2AndL1(address, isDirty);
-
+                    this->loadToL2AndL1(address, false);
+                }
+                else // Hit in victim cache
+                {
+                    // Check if dirty and remove from victim cache
+                    bool isDirty = this->victimCache.isBlockDirty(address);
+                    this->victimCache.removeFromVictimCache(address);
+                    // Load to L1 and L2
+                    loadToL2AndL1(address, isDirty);
+                }
             }
             else // No victim cache
             {
@@ -95,21 +92,18 @@ void CacheController::accessCacheOnWrite(unsigned address)
                 {
                     this->victimCacheAccessed++;
                     // search Victim Cache for the address.
-                    bool hitVictimCache = false;
-                    for (unsigned& value : this->victimCache.fifoQueue)
-                    {
-                        unsigned mask = value & 0xFFFFFFFC;
-                        if (mask == address) {
-                            value |= 1; // write to victim cache and finish.
-                            hitVictimCache = true;
-                            break;
-                        }
-                    }
+                    bool hitVictimCache = this->victimCache.hitInVictim(address);
 
-                    // Not found in victim cache and memory is accessed
+                    // Not found in victim cache and memory is accessed for write. No loading to L1 and L2.
                     if(!hitVictimCache)
+                    {
                         this->memAccessed++;
-
+                    }
+                    else // Hit in victim cache
+                    {
+                        // write to victim cache and finish
+                        this->victimCache.markDirty(address);
+                    }
                 }
                 else // No victim cache
                 {
@@ -144,25 +138,19 @@ void CacheController::accessCacheOnWrite(unsigned address)
                 {
                     this->victimCacheAccessed++;
                     // search Victim Cache for the address.
-                    bool hitVictimCache = false;
-                    bool isDirty = false;
-                    for (unsigned value : this->victimCache.fifoQueue)
-                    {
-                        unsigned mask = value & 0xFFFFFC;
-                        if (mask == address) {
-                            isDirty = 1 & value;
-                            hitVictimCache = true;
-                            this->victimCache.fifoQueue.remove(value);
-                        }
-                    }
+                    bool hitVictimCache = this->victimCache.hitInVictim(address);
 
-                    // Not found in victim cache and memory is accessed
+                    // Not found in victim cache and memory is accessed for write. No loading to L1 and L2.
                     if(!hitVictimCache)
+                    {
                         this->memAccessed++;
-
-                    // Load to L1 and L2.
-                    this->loadToL2AndL1(address, isDirty);
-
+                    }
+                    else // Hit in victim cache
+                    {
+                        // write to victim cache and finish
+                        this->victimCache.removeFromVictimCache(address);
+                    }
+                    this->loadToL2AndL1(address, true);
                 }
                 else // No victim cache. Access memory
                 {
@@ -172,12 +160,10 @@ void CacheController::accessCacheOnWrite(unsigned address)
             }
             else // Hit in L2 cache.
             {
+                // update lru and unmark dirty
                 this->L2.updateLruOnHit(address, false);
-                // TODO check if dirty
-                bool isBlockDirty = this->L2.isDirty(address);
-                if (isBlockDirty)
-                    this->L2.unmarkDirty(address);
-                this->loadToL1(address, isBlockDirty);
+                this->L2.unmarkDirty(address);
+                this->loadToL1(address, true);
             }
         }
         else // Hit in L1 cache.
@@ -205,7 +191,7 @@ void CacheController::loadToL2AndL1(unsigned address, bool isWrite)
                 this->L2.markAsDirty(evictedBlock);
             }
             // Invalidate evicted block in L1.
-            this->L1.removeLruBlock(evictedBlock);
+            this->L1.removeSpecificBlock(evictedBlock);
         }
         // If L2 evicted block is dirty write to victim cache \ memory. Not considering wb time.
         bool isL2EvictedBlockDirty = this->L2.isDirty(evictedBlock);
@@ -221,24 +207,8 @@ void CacheController::loadToL2AndL1(unsigned address, bool isWrite)
     // Update L2 with new block
     this->L2.insertBlockToCache(address, false);
 
-    bool L1SetIsFull = this->L1.isSetFull(address);
-    // L1 set is full
-    if (L1SetIsFull)
-    {
-        // Evict fifoQueue block
-        unsigned L1EvictedBlock = L1.getLruBlock(address);
-
-        bool isL1BLockDirty = this->L1.isDirty(L1EvictedBlock);
-        // Evicted block is dirty. Write to L2 and mark as dirty.
-        if (isL1BLockDirty)
-        {
-            this->L2.markAsDirty(L1EvictedBlock); // TODO complete method
-        }
-        // Evict old block from L1 and load new block
-        this->L1.removeLruBlock(L1EvictedBlock);
-    }
-
-    this->L1.insertBlockToCache(address, isWrite);
+    // Load to L1.
+    this->loadToL1(address, isWrite);
 }
 
 void CacheController::loadToL1(unsigned int address, bool isWrite)
@@ -254,8 +224,8 @@ void CacheController::loadToL1(unsigned int address, bool isWrite)
         // Evicted block is dirty. Write to L2 and mark as dirty.
         if (isL1BLockDirty)
         {
-//            TODO this->L2Accessed++; No consideration of wb.
-            this->L2.markAsDirty(L1EvictedBlock); // TODO complete method
+            // No consideration of wb.
+            this->L2.updateLruOnHit(L1EvictedBlock, true);
         }
         // Evict old block from L1 and load new block
         this->L1.removeLruBlock(L1EvictedBlock);
@@ -356,6 +326,12 @@ void Cache::unmarkDirty(unsigned address) {
     this->cacheLines[set].unmarkDirty(tag);
 }
 
+void Cache::removeSpecificBlock(unsigned int address) {
+    unsigned set = this->parseSet(address);
+    unsigned tag = this->parseTag(address);
+    this->cacheLines[set].removeSpecificBlock(tag);
+}
+
 /**************************************************************************************
  *                                   CacheSet                                         *
  **************************************************************************************/
@@ -420,6 +396,11 @@ void CacheSet::unmarkDirty(unsigned tag) {
     *it &= 0xFFFFFFFE;
 }
 
+void CacheSet::removeSpecificBlock(unsigned tag)
+{
+    this->LRU.erase(map[tag]);
+    this->map.erase(tag);
+}
 /**************************************************************************************
  *                                   VictimCache                                      *
  **************************************************************************************/
@@ -428,7 +409,8 @@ void VictimCache::addBlock(unsigned address, bool isDirty) {
     {
         this->fifoQueue.pop_back();
     }
-    unsigned value = address | isDirty;
+    unsigned mask = this->createMask(address);
+    unsigned value = mask | isDirty;
     this->fifoQueue.push_front(value);
 }
 
@@ -437,7 +419,61 @@ bool VictimCache::isVictimCacheFull() {
 }
 
 bool VictimCache::hitInVictim(unsigned address) {
-    return false;
+    bool hitVictimCache = false;
+    // Create a mask that zeros the offset bits.
+    unsigned addressMask = this->createMask(address);
+    for (unsigned value : this->fifoQueue)
+    {
+        unsigned valueMask = this->createMask(value);
+        if (addressMask == valueMask) {
+            hitVictimCache = true;
+            break;
+        }
+    }
+    return hitVictimCache;
+}
+
+unsigned VictimCache::createMask(unsigned address) {
+    return address >> this->Log_BSize << this->Log_BSize;
+}
+
+void VictimCache::removeFromVictimCache(unsigned address) {
+    unsigned addressMask = this->createMask(address);
+    for (unsigned value : this->fifoQueue)
+    {
+        unsigned valueMask = this->createMask(value);
+        if (addressMask == valueMask) {
+            this->fifoQueue.remove(value);
+            break;
+        }
+    }
+}
+
+bool VictimCache::isBlockDirty(unsigned address) {
+    bool isDirty = false;
+    unsigned addressMask = this->createMask(address);
+    for (unsigned value : this->fifoQueue)
+    {
+        unsigned valueMask = this->createMask(value);
+        if (addressMask == valueMask && value & 1){
+            isDirty = true;
+            break;
+        }
+    }
+    return isDirty;
+}
+
+void VictimCache::markDirty(unsigned address) {
+    unsigned addressMask = this->createMask(address);
+    for (unsigned& value : this->fifoQueue)
+    {
+        unsigned valueMask = this->createMask(value);
+        if (addressMask == valueMask){
+            value |= 1u;
+            break;
+        }
+        assert(false);
+    }
 }
 
 
